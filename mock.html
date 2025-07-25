@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CBT Platform with Charts</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+
+<div id="loginPanel" class="p-6 max-w-xl mx-auto mt-16 bg-white rounded shadow">
+  <h2 class="mb-4 text-xl font-bold text-center">Login</h2>
+  <input id="email" type="text" placeholder="Email" class="w-full mb-3 p-2 border rounded" />
+  <input id="password" type="password" placeholder="Password" class="w-full mb-4 p-2 border rounded" />
+  <button onclick="login()" class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">Login</button>
+</div>
+
+<!-- Admin Panel -->
+<div id="adminPanel" class="hidden p-6 max-w-3xl mx-auto bg-white mt-12 rounded shadow">
+  <h2 class="text-2xl font-bold mb-4">Admin Panel</h2>
+  <textarea id="jsonUpload" rows="4" placeholder='{"name":"Set1","questions":[{"q":"Question text","a":"Option A","b":"Option B","c":"Option C","d":"Option D","ans":"a","explanation":"Explanation text"}]}'
+    class="w-full p-2 border rounded mb-3"></textarea>
+  <button onclick="uploadSet()" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">Upload Set</button>
+  <h3 class="mt-6 font-semibold">Existing Sets</h3>
+  <ul id="setList" class="list-disc pl-5 mt-2"></ul>
+  <button onclick="logout()" class="mt-6 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">Logout</button>
+</div>
+
+<!-- User Dashboard -->
+<div id="userDashboard" class="hidden p-6 max-w-3xl mx-auto bg-white mt-12 rounded shadow">
+  <h2 class="text-2xl font-bold mb-4">User Dashboard</h2>
+  <select id="setSelect" class="w-full p-2 border rounded mb-4"></select>
+  <button onclick="startUserTest()" class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">Start Test</button>
+  <h3 class="mt-6 font-semibold">Attempted Tests</h3>
+  <ul id="attemptedTests" class="list-disc pl-5 mt-2"></ul>
+  <button onclick="logout()" class="mt-4 w-full bg-red-600 text-white py-2 rounded hover:bg-red-700">Logout</button>
+</div>
+
+<!-- Test Panel -->
+<div id="testContainer" class="hidden flex max-w-4xl mx-auto mt-12 bg-white rounded shadow overflow-hidden">
+  <div id="sidebar" class="w-1/4 bg-gray-100 p-4 h-[80vh] overflow-y-auto">
+    <h3 class="font-semibold text-center mb-2">Question Palette</h3>
+    <div id="qPalette" class="grid grid-cols-4 gap-2"></div>
+    <div class="mt-4 space-y-1 text-sm">
+      <p><span class="inline-block w-3 h-3 bg-green-500"></span> Answered</p>
+      <p><span class="inline-block w-3 h-3 bg-purple-500"></span> Review</p>
+      <p><span class="inline-block w-3 h-3 bg-red-300"></span> Not Visited</p>
+    </div>
+  </div>
+  <div class="w-3/4 p-6">
+    <div class="flex justify-between mb-4">
+      <div id="timer" class="font-semibold text-red-600">Time: 90:00</div>
+      <button onclick="logout()" class="bg-red-600 text-white py-1 px-3 rounded hover:bg-red-700">Logout</button>
+    </div>
+    <div id="questionArea" class="mb-4"></div>
+    <div class="flex gap-2">
+      <button onclick="markForReview()" class="bg-yellow-500 text-white py-2 px-4 rounded hover:bg-yellow-600">Mark for Review</button>
+      <button onclick="saveNext()" class="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700">Save & Next</button>
+      <button onclick="submitTest()" class="bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700">Submit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Result Panel -->
+<div id="resultPanel" class="hidden p-6 max-w-3xl mx-auto bg-white mt-12 rounded shadow">
+  <h2 class="text-2xl font-bold mb-4">Test Result</h2>
+  <div id="resultStats" class="mb-4 text-lg"></div>
+  <canvas id="resultChart" class="max-w-md mx-auto"></canvas>
+  <div class="mt-6">
+    <h3 class="font-semibold mb-2">Review Questions</h3>
+    <div id="reviewSummary" class="mb-4 text-sm"></div>
+    <div class="flex items-center gap-2 mb-4">
+      <button onclick="prevReviewQuestion()" class="bg-gray-600 text-white py-1 px-3 rounded hover:bg-gray-700 disabled:opacity-50" disabled>Previous</button>
+      <select id="reviewSelect" class="w-full p-2 border rounded"></select>
+      <button onclick="nextReviewQuestion()" class="bg-gray-600 text-white py-1 px-3 rounded hover:bg-gray-700 disabled:opacity-50" disabled>Next</button>
+    </div>
+    <div id="reviewArea" class="border p-4 rounded bg-gray-50"></div>
+  </div>
+  <button onclick="logout()" class="mt-6 w-full bg-red-600 text-white py-2 rounded hover:bg-red-700">Logout</button>
+</div>
+
+<script>
+const admin = { email: 'admin@admin.com', pass: '1234' };
+const user = { email: 'user@user.com', pass: '1234' };
+let questions = [], answers = [], status = [], currentQ = 0, setName = '', timeLeft = 0, timerInterval, reviewableQuestions = [], currentReviewIndex = -1;
+
+function login() {
+  const e = email.value.trim(), p = password.value.trim();
+  if (e === admin.email && p === admin.pass) { loadSetList('admin'); show('adminPanel'); }
+  else if (e === user.email && p === user.pass) { loadSetList('user'); loadAttemptedTests(); show('userDashboard'); }
+  else alert('Invalid credentials');
+}
+
+function logout() {
+  clearInterval(timerInterval);
+  answers = status = [];
+  show('loginPanel');
+}
+
+function uploadSet() {
+  try {
+    const d = JSON.parse(jsonUpload.value);
+    if (!d.name || !Array.isArray(d.questions)) throw '';
+    const all = JSON.parse(localStorage.getItem('sets') || '{}');
+    all[d.name] = d.questions;
+    localStorage.setItem('sets', JSON.stringify(all));
+    jsonUpload.value = '';
+    loadSetList('admin');
+    alert('Set uploaded: ' + d.name);
+  } catch {
+    alert('Invalid JSON format.');
+  }
+}
+
+function loadSetList(userType) {
+  const all = JSON.parse(localStorage.getItem('sets') || '{}');
+  setList.innerHTML = '';
+  setSelect.innerHTML = '<option value="">Select Set</option>';
+  Object.keys(all).forEach(n => {
+    const li = document.createElement('li');
+    li.innerHTML = `${n} <button onclick="deleteSet('${n}')" class="text-red-600">Delete</button>`;
+    setList.appendChild(li);
+    const opt = document.createElement('option');
+    opt.value = n; opt.textContent = n;
+    setSelect.appendChild(opt);
+  });
+}
+
+function loadAttemptedTests() {
+  const attempts = JSON.parse(localStorage.getItem('userAttempts') || '{}');
+  const attemptedTests = document.getElementById('attemptedTests');
+  attemptedTests.innerHTML = '';
+  Object.keys(attempts).forEach(set => {
+    const attempt = attempts[set];
+    const li = document.createElement('li');
+    li.innerHTML = `${set} - Score: ${attempt.score.toFixed(2)} <button onclick="reattemptTest('${set}')" class="text-blue-600">Reattempt</button>`;
+    attemptedTests.appendChild(li);
+  });
+}
+
+function reattemptTest(set) {
+  setName = set;
+  questions = JSON.parse(localStorage.getItem('sets'))[setName];
+  answers = Array(questions.length).fill(null);
+  status = Array(questions.length).fill('notVisited');
+  currentQ = 0;
+  renderPalette();
+  show('testContainer');
+  startTimer();
+  renderQuestion();
+}
+
+function deleteSet(n) {
+  const all = JSON.parse(localStorage.getItem('sets') || '{}');
+  delete all[n];
+  localStorage.setItem('sets', JSON.stringify(all));
+  const attempts = JSON.parse(localStorage.getItem('userAttempts') || '{}');
+  delete attempts[n];
+  localStorage.setItem('userAttempts', JSON.stringify(attempts));
+  loadSetList('admin');
+  loadAttemptedTests();
+}
+
+function startUserTest() {
+  setName = setSelect.value;
+  if (!setName) return alert('Select a set.');
+  questions = JSON.parse(localStorage.getItem('sets'))[setName];
+  answers = Array(questions.length).fill(null);
+  status = Array(questions.length).fill('notVisited');
+  currentQ = 0;
+  renderPalette();
+  show('testContainer');
+  startTimer();
+  renderQuestion();
+}
+
+function renderPalette() {
+  qPalette.innerHTML = '';
+  questions.forEach((_, i) => {
+    const btn = document.createElement('button');
+    btn.id = `q-${i}`;
+    btn.textContent = i + 1;
+    btn.onclick = () => goTo(i);
+    btn.className = "p-2 rounded text-sm bg-red-300";
+    qPalette.appendChild(btn);
+  });
+}
+
+function renderQuestion() {
+  const q = questions[currentQ];
+  document.getElementById(`q-${currentQ}`).classList.remove('bg-green-500', 'bg-purple-500', 'bg-yellow-500');
+  const div = document.getElementById('questionArea');
+  const btnStatus = status[currentQ];
+  div.innerHTML = `<h3 class="font-semibold mb-2">Q${currentQ + 1}: ${q.q}</h3>` +
+    ['a', 'b', 'c', 'd'].map(o =>
+      `<label class="block"><input type="radio" name="opt" value="${o}" ${answers[currentQ] === o ? 'checked' : ''}/> ${o.toUpperCase()}: ${q[o]}</label>`).join('');
+}
+
+function updateStatus() {
+  let st = answers[currentQ] ? 'attempted' : 'notVisited';
+  if (status[currentQ] === 'marked') st = answers[currentQ] ? 'markedAnswered' : 'marked';
+  status[currentQ] = st;
+  const btn = document.getElementById(`q-${currentQ}`);
+  btn.className = st === 'attempted' ? 'bg-green-500 text-white'
+    : st === 'marked' ? 'bg-purple-500 text-white'
+    : st === 'markedAnswered' ? 'bg-yellow-500 text-white' : 'bg-red-300';
+}
+
+function saveNext() {
+  const sel = document.querySelector('input[name=opt]:checked');
+  answers[currentQ] = sel ? sel.value : null;
+  updateStatus();
+  if (currentQ < questions.length - 1) { currentQ++; renderQuestion(); }
+}
+
+function markForReview() {
+  status[currentQ] = status[currentQ].includes('marked') ? (answers[currentQ] ? 'attempted' : 'notVisited') : (answers[currentQ] ? 'markedAnswered' : 'marked');
+  updateStatus();
+}
+
+function goTo(i) { currentQ = i; renderQuestion(); }
+
+function startTimer() {
+  clearInterval(timerInterval);
+  timeLeft = 90 * 60;
+  timerInterval = setInterval(() => {
+    const m = Math.floor(timeLeft / 60), s = timeLeft % 60;
+    timer.textContent = `Time: ${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    if (timeLeft-- <= 0) { clearInterval(timerInterval); submitTest(); }
+  }, 1000);
+}
+
+function renderReviewQuestion(index) {
+  if (index < 0 || index >= reviewableQuestions.length) {
+    document.getElementById('reviewArea').innerHTML = '';
+    document.getElementById('reviewSelect').value = '';
+    currentReviewIndex = -1;
+    updateNavigationButtons();
+    return;
+  }
+  currentReviewIndex = index;
+  const i = reviewableQuestions[index];
+  const q = questions[i];
+  const userAns = answers[i] ? answers[i].toUpperCase() : 'None';
+  const statusText = answers[i] === null ? 'Unattempted' : 'Wrong';
+  document.getElementById('reviewSelect').value = i;
+  document.getElementById('reviewArea').innerHTML = `
+    <div class="space-y-2">
+      <h3 class="font-semibold text-lg">Q${parseInt(i) + 1}: ${q.q} <span class="text-sm text-gray-500">(${statusText})</span></h3>
+      ${['a', 'b', 'c', 'd'].map(o => `
+        <p class="${o === q.ans ? 'text-green-600 font-semibold' : answers[i] === o && answers[i] !== q.ans ? 'text-red-600' : ''}">
+          ${o.toUpperCase()}: ${q[o]} ${o === q.ans ? '(Correct)' : answers[i] === o && answers[i] !== q.ans ? '(Your Answer)' : ''}
+        </p>`).join('')}
+      <p class="mt-2"><b>Your Answer:</b> ${userAns}</p>
+      ${q.explanation ? `<p class="mt-2"><b>Explanation:</b> ${q.explanation}</p>` : ''}
+    </div>
+  `;
+  updateNavigationButtons();
+}
+
+function updateNavigationButtons() {
+  const prevBtn = document.querySelector('button[onclick="prevReviewQuestion()"]');
+  const nextBtn = document.querySelector('button[onclick="nextReviewQuestion()"]');
+  prevBtn.disabled = currentReviewIndex <= 0;
+  nextBtn.disabled = currentReviewIndex >= reviewableQuestions.length - 1;
+}
+
+function prevReviewQuestion() {
+  if (currentReviewIndex > 0) {
+    renderReviewQuestion(currentReviewIndex - 1);
+  }
+}
+
+function nextReviewQuestion() {
+  if (currentReviewIndex < reviewableQuestions.length - 1) {
+    renderReviewQuestion(currentReviewIndex + 1);
+  }
+}
+
+function submitTest() {
+  clearInterval(timerInterval);
+  let correct = 0, wrong = 0, attempted = 0;
+  reviewableQuestions = [];
+  answers.forEach((a, i) => {
+    if (a) {
+      attempted++;
+      a === questions[i].ans ? correct++ : wrong++;
+    }
+    if (a !== questions[i].ans || a === null) {
+      reviewableQuestions.push(i);
+    }
+  });
+  const score = correct - wrong * 0.25;
+  // Save attempt to localStorage
+  const attempts = JSON.parse(localStorage.getItem('userAttempts') || '{}');
+  attempts[setName] = { score, correct, wrong, attempted, total: questions.length };
+  localStorage.setItem('userAttempts', JSON.stringify(attempts));
+  resultStats.innerHTML = `
+    <p><b>Set:</b> ${setName}</p>
+    <p><b>Total:</b> ${questions.length}</p>
+    <p><b>Attempted:</b> ${attempted}</p>
+    <p><b>Correct:</b> ${correct}</p>
+    <p><b>Wrong:</b> ${wrong}</p>
+    <p class="mt-2 text-xl font-bold">Score: ${score.toFixed(2)}</p>
+  `;
+  // Populate review dropdown and summary
+  const reviewSelect = document.getElementById('reviewSelect');
+  reviewSelect.innerHTML = '<option value="">Select Question</option>';
+  reviewableQuestions.forEach(i => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = `Question ${i + 1} (${answers[i] === null ? 'Unattempted' : 'Wrong'})`;
+    reviewSelect.appendChild(opt);
+  });
+  reviewSelect.onchange = function() {
+    const i = this.value;
+    if (i === '') {
+      renderReviewQuestion(-1);
+      return;
+    }
+    renderReviewQuestion(reviewableQuestions.indexOf(parseInt(i)));
+  };
+  // Review summary
+  const wrongCount = reviewableQuestions.filter(i => answers[i] !== null).length;
+  const unattemptedCount = reviewableQuestions.filter(i => answers[i] === null).length;
+  document.getElementById('reviewSummary').innerHTML = `
+    <p><b>Questions to Review:</b> ${reviewableQuestions.length}</p>
+    <p><span class="inline-block w-3 h-3 bg-red-600"></span> Wrong: ${wrongCount}</p>
+    <p><span class="inline-block w-3 h-3 bg-gray-500"></span> Unattempted: ${unattemptedCount}</p>
+  `;
+  show('resultPanel');
+  // Chart
+  new Chart(document.getElementById('resultChart'), {
+    type: 'pie',
+    data: {
+      labels: ['Correct', 'Wrong', 'Unattempted'],
+      datasets: [{ data: [correct, wrong, questions.length - attempted], backgroundColor: ['#10B981', '#EF4444', '#6366F1'] }]
+    }
+  });
+  // Render first reviewable question if available
+  if (reviewableQuestions.length > 0) {
+    renderReviewQuestion(0);
+  }
+}
+
+function show(panel) {
+  ['loginPanel', 'adminPanel', 'userDashboard', 'testContainer', 'resultPanel']
+    .forEach(id => document.getElementById(id).classList.add('hidden'));
+  document.getElementById(panel).classList.remove('hidden');
+}
+</script>
+
+</body>
+</html>
